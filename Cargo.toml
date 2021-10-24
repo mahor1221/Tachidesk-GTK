@@ -1,0 +1,21 @@
+[package]
+authors = ["Mahor Foruzesh <mahorforuzesh@pm.me>"]
+edition = "2021"
+name = "tachidesk-gtk"
+version = "0.1.0"
+
+[dependencies]
+env_logger = "0.9"
+gettext-rs = "0.7"
+gtk = { version = "0.3", package = "gtk4" }
+log = "0.4"
+once_cell = "1.8"
+reqwest = { version = "0.11", features = ["json", "blocking"] }
+serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+tracker = "0.1"
+# url = "2.1.0"
+
+[profile.release]
+codegen-units = 1
+lto = true
