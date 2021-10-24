@@ -46,9 +46,9 @@ fn main() {
         let tx2 = tx1.clone();
         let mut model = app::Model::new(tx1);
         let mut view = app::View::new(tx2, app);
-        rx.attach(None, move |msg| {
-            // let msg = result.expect("application error: ");
-            model.update(&msg);
+        rx.attach(None, move |result| {
+            let mut msg = result.expect("application error: ");
+            model.update(&mut msg);
             view.refresh(&msg, &model);
             Continue(true)
         });

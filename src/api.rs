@@ -1,8 +1,8 @@
 use gtk::glib::Bytes;
-use reqwest::Error;
 use serde::{Deserialize, Serialize};
+use std::error::Error;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Extension {
     pub apk_name: String,
@@ -18,7 +18,7 @@ pub struct Extension {
     pub obsolete: bool,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Source {
     pub id: String,
@@ -31,7 +31,7 @@ pub struct Source {
     pub display_name: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Manga {
     pub id: u16,
@@ -53,7 +53,7 @@ pub struct Manga {
     pub fresh_data: bool,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct MangaList {
     pub manga_list: Vec<Manga>,
@@ -67,7 +67,7 @@ pub struct MangaList {
 //     Dropped,
 // }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Chapter {
     pub url: String,
@@ -134,7 +134,9 @@ impl Client {
         Self { server }
     }
 
-    pub async fn get_source_list(&self) -> Result<Option<Vec<Source>>, Error> {
+    pub async fn get_source_list(
+        &self,
+    ) -> Result<Option<Vec<Source>>, Box<dyn Error + Sync + Send>> {
         let url = format!("{}/api/v1/source/list", self.server);
         let response = reqwest::get(url).await?.json::<Vec<Source>>().await?;
         Ok(Some(response))
@@ -144,7 +146,7 @@ impl Client {
         &self,
         source_id: &'static str,
         page: u16,
-    ) -> Result<Option<Vec<Manga>>, Error> {
+    ) -> Result<Option<Vec<Manga>>, Box<dyn Error + Sync + Send>> {
         let url = format!(
             "{}/api/v1/source/{}/latest/{}",
             self.server, source_id, page
@@ -153,13 +155,19 @@ impl Client {
         Ok(Some(response.manga_list))
     }
 
-    pub async fn get_manga(&self, manga_id: u16) -> Result<Option<Manga>, Error> {
+    pub async fn get_manga(
+        &self,
+        manga_id: u16,
+    ) -> Result<Option<Manga>, Box<dyn Error + Sync + Send>> {
         let url = format!("{}/api/v1/manga/{}", self.server, manga_id);
         let response = reqwest::get(url).await?.json::<Manga>().await?;
         Ok(Some(response))
     }
 
-    pub async fn get_manga_thumbnail(&self, manga_id: u16) -> Result<Option<Bytes>, Error> {
+    pub async fn get_manga_thumbnail(
+        &self,
+        manga_id: u16,
+    ) -> Result<Option<Bytes>, Box<dyn Error + Sync + Send>> {
         let url = format!("{}/api/v1/manga/{}/thumbnail", self.server, manga_id);
         let response = reqwest::get(url).await?.bytes().await?;
         Ok(Some(Bytes::from_owned(response)))
@@ -168,7 +176,7 @@ impl Client {
     pub async fn get_manga_chapter_list(
         &self,
         manga_id: u16,
-    ) -> Result<Option<Vec<Chapter>>, Error> {
+    ) -> Result<Option<Vec<Chapter>>, Box<dyn Error + Sync + Send>> {
         let url = format!("{}/api/v1/manga/{}/chapters", self.server, manga_id);
         let response = reqwest::get(url).await?.json::<Vec<Chapter>>().await?;
         Ok(Some(response))
@@ -179,7 +187,7 @@ impl Client {
         manga_id: u16,
         chapter: u16,
         page: u16,
-    ) -> Result<Option<Bytes>, Error> {
+    ) -> Result<Option<Bytes>, Box<dyn Error + Sync + Send>> {
         let url = format!(
             "{}/api/v1/manga/{}/chapter/{}/page/{}",
             self.server, manga_id, chapter, page
