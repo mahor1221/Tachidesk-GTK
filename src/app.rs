@@ -1,17 +1,37 @@
-use crate::api::*;
+use crate::api;
 use crate::{API_CLIENT, RUNTIME};
-use gtk::glib::Sender;
+use gtk::gdk_pixbuf::Pixbuf;
+use gtk::gio;
+use gtk::glib::{Bytes, Sender};
 use gtk::prelude::*;
-use gtk::{Application, ApplicationWindow, HeaderBar, Label, Paned, Stack, StackSidebar};
+use gtk::{
+    Application, ApplicationWindow, FlowBox, Frame, HeaderBar, Image, Label, Paned, ScrolledWindow,
+    SelectionMode, Stack, StackSidebar,
+};
 use std::error::Error;
 
+pub struct Manga {
+    manga: api::Manga,
+    thumbnail: Option<Bytes>,
+}
+
+impl std::ops::Deref for Manga {
+    type Target = api::Manga;
+    fn deref(&self) -> &Self::Target {
+        &self.manga
+    }
+}
+
 pub enum Message {
-    SourceList(Option<Vec<Source>>),
+    SourceList(Option<Vec<api::Source>>),
+    MangaList(Option<Vec<api::Manga>>),
+    Thumbnail(Option<Bytes>, u16),
 }
 
 pub struct Model {
     tx: Sender<Result<Message, Box<dyn Error + Sync + Send>>>,
-    source_list: Option<Vec<Source>>,
+    source_list: Option<Vec<api::Source>>,
+    manga_list: Option<Vec<Manga>>,
 }
 
 impl Model {
@@ -23,24 +43,51 @@ impl Model {
             _tx.send(result).expect("Receiver");
         });
 
+        let _tx = tx.clone();
+        let handle = RUNTIME.spawn(async move {
+            let result = API_CLIENT.get_manga_list("1024627298672457456", 1).await;
+            let result = result.map(|option| Message::MangaList(option));
+            _tx.send(result).expect("Receiver");
+        });
+
         Self {
             tx,
             source_list: None,
+            manga_list: None,
         }
     }
-
     pub fn update(&mut self, msg: &mut Message) {
         match msg {
             Message::SourceList(option) => {
                 self.source_list = option.take();
             }
+            Message::MangaList(option) => {
+                self.manga_list = option.take().map(|vec| {
+                    vec.into_iter()
+                        .map(|manga| Manga {
+                            manga,
+                            thumbnail: None,
+                        })
+                        .collect()
+                });
+            }
+            Message::Thumbnail(option, id) => {
+                // self.manga_list.unwrap(),
+            }
         }
+    }
+    pub fn source_list(&self) -> Option<&Vec<api::Source>> {
+        self.source_list.as_ref()
+    }
+    pub fn manga_list(&self) -> Option<&Vec<Manga>> {
+        self.manga_list.as_ref()
     }
 }
 
 pub struct View {
     tx: Sender<Result<Message, Box<dyn Error + Sync + Send>>>,
     sidebar_stack: Stack,
+    flowbox: FlowBox,
 }
 
 impl View {
@@ -48,6 +95,12 @@ impl View {
         tx: Sender<Result<Message, Box<dyn Error + Sync + Send>>>,
         app: &Application,
     ) -> Self {
+        let flowbox = FlowBox::builder()
+            .selection_mode(SelectionMode::None)
+            .build();
+        let frame = Frame::builder().child(&flowbox).build();
+        let scrolled_window = ScrolledWindow::builder().child(&frame).build();
+
         let sidebar_stack = Stack::builder().build();
         let label = Label::builder().label("Test").build();
         sidebar_stack.add_titled(&label, None, &label.label().to_string());
@@ -57,7 +110,7 @@ impl View {
             .resize_start_child(false)
             .shrink_start_child(false)
             .start_child(&sidebar)
-            .end_child(&sidebar_stack)
+            .end_child(&scrolled_window)
             .build();
 
         let window = ApplicationWindow::builder()
@@ -87,22 +140,56 @@ impl View {
         //     Continue(true)
         // });
 
-        Self { tx, sidebar_stack }
+        Self {
+            tx,
+            sidebar_stack,
+            flowbox,
+        }
     }
 
     pub fn refresh(&mut self, msg: &Message, model: &Model) {
         match msg {
             Message::SourceList(_) => {
                 // TODO: Handle None variant
-                let source_list = model.source_list.as_ref().unwrap();
-                for source in source_list {
-                    if source.lang == "en" {
+                let list = model.source_list().unwrap();
+                for source in list {
+                    if source.lang != "en" {
                         continue;
                     }
                     let label = Label::builder().label(&source.display_name).build();
                     self.sidebar_stack
                         .add_titled(&label, None, &label.label().to_string());
                 }
+            }
+            Message::MangaList(_) => {
+                // TODO: Handle None variant
+                let list = model.manga_list().unwrap();
+                for manga in list {
+                    let image = Image::builder()
+                        .height_request(200)
+                        .width_request(200)
+                        .build();
+                    self.flowbox.insert(&image, -1);
+
+                    // gtk::Image doesn't implement Send trait
+                    // So we have to send glib::Bytes
+                    let _tx = self.tx.clone();
+                    let id = manga.id;
+                    let handle = RUNTIME.spawn(async move {
+                        let result = API_CLIENT.get_manga_thumbnail(id).await;
+                        let result = result.map(|option| Message::Thumbnail(option, id));
+                        _tx.send(result).expect("Receiver");
+                    });
+                }
+            }
+            Message::Thumbnail(_, _) => {
+                // TODO: Handle None variant
+
+                // let bytes = model.manga_list();
+                // let stream = gio::MemoryInputStream::from_bytes(&bytes);
+                // let pixbuf = Pixbuf::from_stream(&stream, Some(&gio::Cancellable::new())).unwrap();
+                // let image = Image::builder().build();
+                // image.set_from_pixbuf(Some(&pixbuf));
             }
         }
     }
