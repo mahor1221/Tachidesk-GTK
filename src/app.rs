@@ -5,8 +5,8 @@ use gtk::gio;
 use gtk::glib::{Bytes, Sender};
 use gtk::prelude::*;
 use gtk::{
-    Application, ApplicationWindow, FlowBox, Frame, HeaderBar, Image, Label, Paned, ScrolledWindow,
-    SelectionMode, Stack, StackSidebar,
+    Application, ApplicationWindow, FlowBox, FlowBoxChild, Frame, HeaderBar, Image, Label, Paned,
+    ScrolledWindow, SelectionMode, Spinner, Stack, StackSidebar,
 };
 use std::error::Error;
 
@@ -25,7 +25,7 @@ impl std::ops::Deref for Manga {
 pub enum Message {
     SourceList(Option<Vec<api::Source>>),
     MangaList(Option<Vec<api::Manga>>),
-    Thumbnail(Option<Bytes>, u16),
+    Thumbnail(Option<Bytes>, usize),
 }
 
 pub struct Model {
@@ -71,8 +71,8 @@ impl Model {
                         .collect()
                 });
             }
-            Message::Thumbnail(option, id) => {
-                // self.manga_list.unwrap(),
+            Message::Thumbnail(option, index) => {
+                self.manga_list.as_mut().unwrap()[*index].thumbnail = option.take();
             }
         }
     }
@@ -88,6 +88,7 @@ pub struct View {
     tx: Sender<Result<Message, Box<dyn Error + Sync + Send>>>,
     sidebar_stack: Stack,
     flowbox: FlowBox,
+    manga_index: usize,
 }
 
 impl View {
@@ -102,8 +103,6 @@ impl View {
         let scrolled_window = ScrolledWindow::builder().child(&frame).build();
 
         let sidebar_stack = Stack::builder().build();
-        let label = Label::builder().label("Test").build();
-        sidebar_stack.add_titled(&label, None, &label.label().to_string());
         let sidebar = StackSidebar::builder().stack(&sidebar_stack).build();
 
         let paned = Paned::builder()
@@ -144,6 +143,7 @@ impl View {
             tx,
             sidebar_stack,
             flowbox,
+            manga_index: 0,
         }
     }
 
@@ -153,9 +153,9 @@ impl View {
                 // TODO: Handle None variant
                 let list = model.source_list().unwrap();
                 for source in list {
-                    if source.lang != "en" {
-                        continue;
-                    }
+                    // if source.lang != "en" {
+                    //     continue;
+                    // }
                     let label = Label::builder().label(&source.display_name).build();
                     self.sidebar_stack
                         .add_titled(&label, None, &label.label().to_string());
@@ -165,31 +165,46 @@ impl View {
                 // TODO: Handle None variant
                 let list = model.manga_list().unwrap();
                 for manga in list {
-                    let image = Image::builder()
+                    let spinner = Spinner::builder()
                         .height_request(200)
                         .width_request(200)
+                        .spinning(true)
                         .build();
-                    self.flowbox.insert(&image, -1);
+                    // -1 means insert at the end
+                    self.flowbox.insert(&spinner, -1);
 
                     // gtk::Image doesn't implement Send trait
                     // So we have to send glib::Bytes
-                    let _tx = self.tx.clone();
                     let id = manga.id;
+                    let index = self.manga_index;
+                    let _tx = self.tx.clone();
                     let handle = RUNTIME.spawn(async move {
                         let result = API_CLIENT.get_manga_thumbnail(id).await;
-                        let result = result.map(|option| Message::Thumbnail(option, id));
+                        let result = result.map(|option| Message::Thumbnail(option, index));
                         _tx.send(result).expect("Receiver");
                     });
+
+                    self.manga_index += 1;
                 }
             }
-            Message::Thumbnail(_, _) => {
+            Message::Thumbnail(_, index) => {
                 // TODO: Handle None variant
+                let bytes = &model.manga_list().unwrap()[*index]
+                    .thumbnail
+                    .as_ref()
+                    .unwrap();
+                let stream = gio::MemoryInputStream::from_bytes(&bytes);
+                let pixbuf = Pixbuf::from_stream(&stream, Some(&gio::Cancellable::new())).unwrap();
+                let image = Image::builder()
+                    .height_request(200)
+                    .width_request(200)
+                    .build();
+                image.set_from_pixbuf(Some(&pixbuf));
 
-                // let bytes = model.manga_list();
-                // let stream = gio::MemoryInputStream::from_bytes(&bytes);
-                // let pixbuf = Pixbuf::from_stream(&stream, Some(&gio::Cancellable::new())).unwrap();
-                // let image = Image::builder().build();
-                // image.set_from_pixbuf(Some(&pixbuf));
+                self.flowbox
+                    .child_at_index(*index as i32)
+                    .unwrap()
+                    .set_child(Some(&image));
             }
         }
     }
