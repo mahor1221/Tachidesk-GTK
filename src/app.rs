@@ -1,5 +1,4 @@
-use crate::api;
-use crate::{API_CLIENT, RUNTIME};
+use crate::{api, API_CLIENT, RUNTIME};
 use gtk::gdk_pixbuf::Pixbuf;
 use gtk::gio;
 use gtk::glib::{Bytes, Sender};
@@ -9,6 +8,8 @@ use gtk::{
     ScrolledWindow, SelectionMode, Spinner, Stack, StackSidebar,
 };
 use std::error::Error;
+
+// TODO: replace expect("...")
 
 pub struct Manga {
     manga: api::Manga,
@@ -26,6 +27,7 @@ pub enum Message {
     SourceList(Option<Vec<api::Source>>),
     MangaList(Option<Vec<api::Manga>>),
     Thumbnail(Option<Bytes>, usize),
+    Sidebar(u16),
 }
 
 pub struct Model {
@@ -37,16 +39,9 @@ pub struct Model {
 impl Model {
     pub fn new(tx: Sender<Result<Message, Box<dyn Error + Sync + Send>>>) -> Self {
         let _tx = tx.clone();
-        let handle = RUNTIME.spawn(async move {
+        RUNTIME.spawn(async move {
             let result = API_CLIENT.get_source_list().await;
             let result = result.map(|option| Message::SourceList(option));
-            _tx.send(result).expect("Receiver");
-        });
-
-        let _tx = tx.clone();
-        let handle = RUNTIME.spawn(async move {
-            let result = API_CLIENT.get_manga_list("1024627298672457456", 1).await;
-            let result = result.map(|option| Message::MangaList(option));
             _tx.send(result).expect("Receiver");
         });
 
@@ -62,18 +57,20 @@ impl Model {
                 self.source_list = option.take();
             }
             Message::MangaList(option) => {
-                self.manga_list = option.take().map(|vec| {
-                    vec.into_iter()
-                        .map(|manga| Manga {
-                            manga,
-                            thumbnail: None,
-                        })
-                        .collect()
-                });
+                // self.manga_list = option.take().map(|vec| {
+                //     vec.into_iter()
+                //         .map(|manga| Manga {
+                //             manga,
+                //             thumbnail: None,
+                //         })
+                //         .collect()
+                // });
             }
             Message::Thumbnail(option, index) => {
-                self.manga_list.as_mut().unwrap()[*index].thumbnail = option.take();
+                // self.manga_list.as_mut().expect("MangaList is None")[*index].thumbnail =
+                //     option.take();
             }
+            Message::Sidebar(_) => {}
         }
     }
     pub fn source_list(&self) -> Option<&Vec<api::Source>> {
@@ -123,6 +120,19 @@ impl View {
         window.set_titlebar(Some(&header_bar));
         window.show();
 
+        let _tx = tx.clone();
+        sidebar_stack.connect_visible_child_notify(move |stack| {
+            let _tx = _tx.clone();
+            let source_id = stack
+                .visible_child_name()
+                .expect("Visible StackChild is None");
+            RUNTIME.spawn(async move {
+                let result = API_CLIENT.get_manga_list(&source_id, 1).await;
+                let result = result.map(|option| Message::MangaList(option));
+                _tx.send(result).expect("Receiver");
+            });
+        });
+
         // let _tx = tx.clone();
         // let (counter1_tx, counter1_rx) = MainContext::channel(PRIORITY_DEFAULT);
         // self.counter1.transmit(counter1_tx);
@@ -151,19 +161,24 @@ impl View {
         match msg {
             Message::SourceList(_) => {
                 // TODO: Handle None variant
-                let list = model.source_list().unwrap();
+                let list = model.source_list().expect("SourceList is None");
                 for source in list {
-                    // if source.lang != "en" {
-                    //     continue;
-                    // }
-                    let label = Label::builder().label(&source.display_name).build();
+                    if source.lang != "en" {
+                        continue;
+                    }
+                    let name = &source.display_name;
+                    let label = Label::builder().label(name).build();
                     self.sidebar_stack
-                        .add_titled(&label, None, &label.label().to_string());
+                        .add_titled(&label, Some(&source.id), name);
                 }
             }
-            Message::MangaList(_) => {
+            Message::MangaList(option) => {
                 // TODO: Handle None variant
-                let list = model.manga_list().unwrap();
+                // let list = model.manga_list().expect("MangaList is None");
+                let list = option.as_ref().expect("MangaList is None");
+                self.flowbox = FlowBox::builder()
+                    .selection_mode(SelectionMode::None)
+                    .build();
                 for manga in list {
                     let spinner = Spinner::builder()
                         .height_request(200)
@@ -178,7 +193,7 @@ impl View {
                     let id = manga.id;
                     let index = self.manga_index;
                     let _tx = self.tx.clone();
-                    let handle = RUNTIME.spawn(async move {
+                    RUNTIME.spawn(async move {
                         let result = API_CLIENT.get_manga_thumbnail(id).await;
                         let result = result.map(|option| Message::Thumbnail(option, index));
                         _tx.send(result).expect("Receiver");
@@ -187,14 +202,16 @@ impl View {
                     self.manga_index += 1;
                 }
             }
-            Message::Thumbnail(_, index) => {
+            Message::Thumbnail(option, index) => {
                 // TODO: Handle None variant
-                let bytes = &model.manga_list().unwrap()[*index]
-                    .thumbnail
-                    .as_ref()
-                    .unwrap();
+                // let bytes = &model.manga_list().expect("MangaList is None")[*index]
+                //     .thumbnail
+                //     .as_ref()
+                //     .expect("Thumbnail is None");
+                let bytes = option.as_ref().expect("Thumbnail is None");
                 let stream = gio::MemoryInputStream::from_bytes(&bytes);
-                let pixbuf = Pixbuf::from_stream(&stream, Some(&gio::Cancellable::new())).unwrap();
+                let pixbuf = Pixbuf::from_stream(&stream, Some(&gio::Cancellable::new()))
+                    .expect("Can't create Pixbuf from stream");
                 let image = Image::builder()
                     .height_request(200)
                     .width_request(200)
@@ -203,9 +220,10 @@ impl View {
 
                 self.flowbox
                     .child_at_index(*index as i32)
-                    .unwrap()
+                    .expect("FlowboxChild is None at given index")
                     .set_child(Some(&image));
             }
+            Message::Sidebar(_) => {}
         }
     }
 }
