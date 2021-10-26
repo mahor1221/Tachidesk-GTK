@@ -126,12 +126,14 @@ pub struct Chapter {
 #[derive(Clone)]
 pub struct Client {
     // server: Url,
-    server: &'static str,
+    server: String,
 }
 
 impl Client {
-    pub fn new(server: &'static str) -> Self {
-        Self { server }
+    pub fn new(server: &str) -> Self {
+        Self {
+            server: server.to_string(),
+        }
     }
 
     pub async fn get_source_list(
@@ -144,7 +146,7 @@ impl Client {
 
     pub async fn get_manga_list(
         &self,
-        source_id: &'static str,
+        source_id: &str,
         page: u16,
     ) -> Result<Option<Vec<Manga>>, Box<dyn Error + Sync + Send>> {
         let url = format!(
